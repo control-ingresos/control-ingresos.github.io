@@ -1,0 +1,1864 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#16303F">
+<title>Guardia</title>
+
+<!-- Supabase y lector de códigos (respaldo si el celular no lee PDF417 de forma nativa) -->
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@zxing/library@0.21/umd/index.min.js"></script>
+
+<style>
+  :root {
+    --garita: #16303F;      /* azul oscuro de la cabina */
+    --garita-2: #23485C;
+    --barrera: #F2B705;     /* amarillo de barrera */
+    --fondo: #E9EEF1;
+    --papel: #FFFFFF;
+    --tinta: #14212B;
+    --gris: #5B6B76;
+    --linea: #C9D3DA;
+    --ok: #1E7A46;
+    --error: #B3261E;
+    --aviso: #8A5A00;
+    --radio: 10px;
+    font-family: system-ui, "Roboto", "Segoe UI", sans-serif;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: var(--fondo); color: var(--tinta); }
+  body { min-height: 100vh; padding-bottom: env(safe-area-inset-bottom, 0px); }
+
+  /* Encabezado con franja de barrera */
+  header {
+    background: var(--garita);
+    color: #fff;
+    padding: calc(12px + env(safe-area-inset-top, 0px)) 16px 12px;
+    display: flex; align-items: center; justify-content: space-between; gap: 12px;
+    position: relative;
+  }
+  header::after {
+    content: ""; position: absolute; left: 0; right: 0; bottom: -6px; height: 6px;
+    background: repeating-linear-gradient(-45deg, var(--barrera) 0 14px, var(--tinta) 14px 28px);
+  }
+  header h1 { font-size: 1.15rem; margin: 0; font-weight: 700; touch-action: none; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
+  header .quien { font-size: 0.85rem; opacity: 0.85; margin-top: 2px; }
+  header button {
+    background: transparent; color: #fff; border: 1px solid rgba(255,255,255,.4);
+    border-radius: var(--radio); padding: 8px 12px; font-size: 0.85rem;
+  }
+
+  main { max-width: 560px; margin: 0 auto; padding: 22px 14px 40px; }
+
+  section.bloque {
+    background: var(--papel); border-radius: var(--radio);
+    padding: 16px; margin-bottom: 14px; border: 1px solid var(--linea);
+  }
+  h2 { font-size: 1.05rem; margin: 0 0 12px; }
+
+  label { display: block; font-size: 0.9rem; color: var(--gris); margin: 12px 0 4px; }
+  input, select, textarea {
+    width: 100%; font-size: 1.05rem; padding: 12px; color: var(--tinta);
+    border: 1px solid var(--linea); border-radius: var(--radio); background: #fff;
+  }
+  textarea { min-height: 70px; font-size: 0.9rem; }
+  input:focus, select:focus, textarea:focus, button:focus-visible {
+    outline: 3px solid var(--barrera); outline-offset: 1px;
+  }
+  .fila { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+
+  button.principal, button.secundario {
+    width: 100%; font-size: 1.1rem; font-weight: 600; padding: 15px;
+    border-radius: var(--radio); border: none; margin-top: 12px;
+  }
+  button.principal { background: var(--garita); color: #fff; }
+  button.secundario { background: #fff; color: var(--garita); border: 2px solid var(--garita); }
+  button:disabled { opacity: .55; }
+
+  .escanear { background: var(--barrera); color: var(--tinta); }
+
+  .mensaje { border-radius: var(--radio); padding: 12px 14px; margin-top: 12px; font-size: 0.98rem; display: none; }
+  .mensaje.ok    { display: block; background: #E3F2E9; color: var(--ok); }
+  .mensaje.error { display: block; background: #FBE7E6; color: var(--error); }
+  .mensaje.aviso { display: block; background: #FFF3D1; color: var(--aviso); }
+
+  h3 { font-size: 1rem; margin: 20px 0 0; padding-top: 14px; border-top: 1px solid var(--linea); }
+  .vencido { color: var(--error); font-weight: 600; }
+
+  details summary { cursor: pointer; color: var(--gris); font-size: 0.9rem; margin-top: 14px; }
+
+  .foto-previa { margin-top: 12px; display: none; text-align: center; }
+  .foto-previa img { max-width: 100%; max-height: 320px; border-radius: var(--radio); }
+  .foto-previa small { display: block; color: var(--gris); margin-top: 4px; }
+
+  .recientes { list-style: none; margin: 0; padding: 0; }
+  .recientes li { display: flex; gap: 12px; align-items: center; padding: 10px 0; border-top: 1px solid var(--linea); }
+  .recientes li:first-child { border-top: none; }
+  .recientes img, .recientes .sin-foto {
+    width: 56px; height: 56px; object-fit: cover; border-radius: 8px; background: var(--fondo); flex: none;
+  }
+  .recientes .nombre { font-weight: 600; }
+  .recientes .datos { font-size: 0.85rem; color: var(--gris); }
+
+  /* Cámara del escáner a pantalla completa */
+  #escaner {
+    position: fixed; inset: 0; background: #000; z-index: 10;
+    display: none; overflow: hidden;
+  }
+  /* la imagen de la cámara ocupa la pantalla, sin empujar nada */
+  #escaner video {
+    position: absolute; inset: 0; width: 100%; height: 100%;
+    object-fit: cover; z-index: 1;
+  }
+  #escaner .guia {
+    position: absolute; left: 6%; right: 6%; top: 30%; height: 20%; z-index: 2;
+    border: 3px solid var(--barrera); border-radius: 8px; pointer-events: none;
+  }
+  /* los botones quedan siempre encima, pegados abajo */
+  #escaner .pie {
+    position: absolute; left: 0; right: 0; bottom: 0; z-index: 3;
+    background: var(--garita); color: #fff; text-align: center;
+    padding: 14px 16px calc(14px + env(safe-area-inset-bottom, 0px));
+  }
+  #escaner .pie p { margin: 0 0 10px; font-size: 0.95rem; }
+
+  #escaner .camara-info { font-size: 0.85rem; opacity: .8; }
+  #escaner .botones-pie { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  #escaner .botones-pie button { margin-top: 0; font-size: 1rem; }
+
+  /* Inicio: tres botones grandes */
+  .menu { display: grid; gap: 14px; }
+  .menu button {
+    width: 100%; border: none; border-radius: 14px; padding: 26px 18px;
+    font-size: 1.45rem; font-weight: 700; text-align: left;
+    display: flex; flex-direction: column; gap: 4px;
+  }
+  .menu button small { font-size: 0.9rem; font-weight: 400; opacity: .85; }
+  .menu .m-ingreso  { background: var(--barrera); color: var(--tinta); }
+  .menu .m-salida   { background: var(--garita); color: #fff; }
+  .menu .m-consulta { background: #fff; color: var(--garita); border: 2px solid var(--garita); }
+
+  /* Buscador */
+  .buscador { display: grid; grid-template-columns: 1fr auto; gap: 10px; align-items: end; }
+  .buscador input { font-size: 1.6rem; letter-spacing: .04em; padding: 14px; }
+  .buscador button { margin-top: 0; width: auto; padding: 16px 14px; font-size: 1rem; }
+  .resultados li { cursor: pointer; }
+
+  /* Ficha */
+  .ficha-foto { width: 100%; max-height: 360px; object-fit: cover; border-radius: var(--radio); background: var(--fondo); display: block; }
+  .ficha-nombre { font-size: 1.35rem; font-weight: 700; margin: 12px 0 2px; }
+  .ficha-doc { color: var(--gris); font-size: 1.05rem; }
+  .permiso-badge {
+    display: inline-block; margin-top: 10px; padding: 6px 12px; border-radius: 999px;
+    font-weight: 700; font-size: 0.95rem; background: var(--fondo); color: var(--tinta);
+  }
+  .permiso-badge.autorizado { background: var(--ok); color: #fff; }
+
+  /* Lotes y patentes como fichas tocables */
+  .chips { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+  .chip {
+    border: 2px solid var(--garita); background: #fff; color: var(--garita);
+    border-radius: 999px; padding: 8px 14px; font-size: 1rem; font-weight: 600;
+  }
+  .chip.activo { background: var(--garita); color: #fff; }
+  .agregar-lote { display: grid; grid-template-columns: 1fr auto; gap: 10px; }
+  .agregar-lote button { margin-top: 0; width: auto; padding: 12px 16px; }
+
+  .opciones { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
+  .opciones .chip { padding: 12px 4px; border-radius: var(--radio); }
+
+  .contador { display: flex; align-items: center; gap: 14px; }
+  .contador button { width: 54px; height: 54px; font-size: 1.6rem; margin: 0; padding: 0; }
+  .contador span { font-size: 1.5rem; font-weight: 700; min-width: 2ch; text-align: center; }
+
+  .registrar { background: var(--ok) !important; }
+
+  /* Confirmación grande */
+  #confirmacion {
+    position: fixed; inset: 0; z-index: 20; display: none;
+    background: var(--ok); color: #fff;
+    align-items: center; justify-content: center; text-align: center;
+    font-size: 2rem; font-weight: 800; padding: 24px;
+  }
+
+  #modalSalir {
+    position: fixed; inset: 0; z-index: 30; display: none;
+    background: rgba(20, 33, 43, .75); align-items: center; justify-content: center; padding: 16px;
+  }
+  #modalSalir .bloque { width: 100%; max-width: 420px; margin: 0; }
+
+  .contador-adentro { font-size: 0.95rem; color: var(--gris); margin: -6px 0 10px; }
+  .item-salida .lotes { font-size: 0.9rem; color: var(--tinta); font-weight: 600; }
+  .boton-salida { background: var(--garita) !important; font-size: 1.25rem !important; padding: 20px !important; }
+  .agregar-chico { background: none; border: none; color: var(--garita); text-decoration: underline;
+                   font-size: 0.9rem; padding: 10px 0 0; margin-top: 6px; }
+  .agregar-chico-panel { display: grid; grid-template-columns: 1fr auto; gap: 8px; margin-top: 6px; }
+  .agregar-chico-panel input { padding: 8px; font-size: 0.95rem; }
+  .agregar-chico-panel button { margin: 0; padding: 8px 12px; font-size: 0.9rem; width: auto; }
+  .conf-salida-dato { margin-top: 6px; font-size: 1rem; }
+
+  .volver { background: none; border: none; color: var(--garita); font-size: 1rem; padding: 4px 0 12px; font-weight: 600; }
+
+  .oculto { display: none !important; }
+
+  @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+</style>
+</head>
+<body>
+
+<header>
+  <div>
+    <h1>Control de ingreso</h1>
+    <div class="quien" id="quien"></div>
+  </div>
+</header>
+
+<main>
+
+  <!-- ============ INICIO DE SESIÓN ============ -->
+  <section class="bloque oculto" id="vistaLogin">
+    <h2>Iniciar sesión</h2>
+    <label for="email">Email</label>
+    <input id="email" type="email" autocomplete="username">
+    <label for="clave">Contraseña</label>
+    <input id="clave" type="password" autocomplete="current-password">
+    <button class="principal" id="btnEntrar">Entrar</button>
+    <div class="mensaje" id="msgLogin"></div>
+  </section>
+
+  <!-- ============ INICIO ============ -->
+  <div class="oculto" id="vistaInicio">
+    <div class="menu">
+      <button class="m-ingreso" id="btnIrIngreso">Ingreso<small>Buscar por DNI y registrar la entrada</small></button>
+      <button class="m-salida" id="btnIrSalida">Salida<small>Ver quién está adentro y registrar salidas</small></button>
+      <button class="m-consulta" id="btnIrConsultas" disabled>Consultas<small>Próximamente</small></button>
+    </div>
+  </div>
+
+  <!-- ============ INGRESO: BUSCAR ============ -->
+  <div class="oculto" id="vistaIngreso">
+    <button class="volver" data-inicio>← Inicio</button>
+    <section class="bloque">
+      <h2>Ingreso</h2>
+      <div class="buscador">
+        <div>
+          <label for="numBuscar">Número de DNI</label>
+          <input id="numBuscar" inputmode="numeric" autocomplete="off" placeholder="Ej.: 25029106">
+        </div>
+        <button class="principal escanear" id="btnEscanearIngreso">Escanear</button>
+      </div>
+      <ul class="recientes resultados" id="listaResultados"></ul>
+      <button class="secundario oculto" id="btnNoRegistrado">No está registrado: dar de alta</button>
+      <div class="mensaje" id="msgIngreso"></div>
+    </section>
+  </div>
+
+  <!-- ============ FICHA Y REGISTRO DE ENTRADA ============ -->
+  <div class="oculto" id="vistaFicha">
+    <button class="volver" data-inicio>← Inicio</button>
+    <section class="bloque">
+      <img class="ficha-foto" id="fichaFoto" alt="Foto de la persona">
+      <div class="ficha-nombre" id="fichaNombre"></div>
+      <div class="ficha-doc" id="fichaDoc"></div>
+      <span class="permiso-badge" id="fichaPermiso"></span>
+      <div class="mensaje" id="msgFichaAviso"></div>
+      <div class="mensaje" id="msgFichaSeguro"></div>
+      <button class="secundario oculto" id="btnActualizarSeguro">Actualizar seguro</button>
+      <div class="oculto" id="panelSeguro">
+        <h3>Nuevo seguro</h3>
+        <label for="fsDesc">Aseguradora (opcional)</label>
+        <input id="fsDesc" autocomplete="off" placeholder="Ej.: La Caja, Sancor">
+        <label for="fsVence">Vence</label>
+        <input id="fsVence" type="date">
+        <button class="secundario" id="btnFsFoto">Foto Certificado</button>
+        <input type="file" id="inFsFoto" accept="image/*" capture="environment" hidden>
+        <div class="foto-previa" id="fsPrevia">
+          <img id="fsImg" alt="Certificado de seguro">
+          <small id="fsPeso"></small>
+        </div>
+        <button class="principal" id="btnFsGuardar">Guardar seguro</button>
+        <button class="secundario" id="btnFsCancelar">Cancelar</button>
+        <div class="mensaje" id="msgFs"></div>
+      </div>
+      <div class="mensaje" id="msgFichaAdentro"></div>
+      <div class="ficha-doc" id="fichaObs" style="margin-top:10px"></div>
+    </section>
+
+    <section class="bloque">
+      <h2>Registrar entrada</h2>
+
+      <label for="loteNuevo">Lote (uno o varios)</label>
+      <div class="agregar-lote">
+        <input id="loteNuevo" inputmode="numeric" autocomplete="off" placeholder="Número de lote">
+        <button class="principal" id="btnAgregarLote">Agregar</button>
+      </div>
+      <div class="chips" id="chipsLotes"></div>
+
+      <label for="patente">Patente (opcional)</label>
+      <div class="chips" id="chipsPatentes"></div>
+      <input id="patente" autocomplete="off" style="text-transform:uppercase; margin-top:8px" placeholder="Otra patente">
+
+      <label>Cómo llegó</label>
+      <div class="opciones" id="opcionesMedio">
+        <button class="chip" data-medio="auto">Auto</button>
+        <button class="chip" data-medio="moto">Moto</button>
+        <button class="chip" data-medio="bici">Bici</button>
+        <button class="chip" data-medio="a_pie">A pie</button>
+      </div>
+
+      <label>Acompañantes</label>
+      <div class="contador">
+        <button class="secundario" id="btnMenos">−</button>
+        <span id="numAcomp">0</span>
+        <button class="secundario" id="btnMas">+</button>
+      </div>
+
+      <label for="obsEntrada">Observaciones (opcional)</label>
+      <input id="obsEntrada" autocomplete="off">
+
+      <button class="principal registrar" id="btnRegistrarEntrada">Registrar entrada</button>
+      <div class="mensaje" id="msgEntrada"></div>
+    </section>
+  </div>
+
+  <!-- ============ SALIDA: QUIÉN ESTÁ ADENTRO ============ -->
+  <div class="oculto" id="vistaSalida">
+    <button class="volver" data-inicio>← Inicio</button>
+    <section class="bloque">
+      <h2>Salida</h2>
+      <div class="contador-adentro" id="cantAdentro"></div>
+      <label for="buscarSalida">Buscar por DNI, apellido o patente</label>
+      <input id="buscarSalida" autocomplete="off" placeholder="Ej.: 25029106, GARCIA o AB123CD">
+      <ul class="recientes resultados" id="listaAdentro"></ul>
+      <div class="mensaje" id="msgSalidaLista"></div>
+
+      <button class="secundario" id="btnNoFigura">No figura adentro</button>
+      <div class="oculto" id="panelNoFigura">
+        <label for="dniNoFigura">Número de DNI</label>
+        <input id="dniNoFigura" inputmode="numeric" autocomplete="off">
+        <ul class="recientes resultados" id="listaNoFigura"></ul>
+      </div>
+    </section>
+  </div>
+
+  <!-- ============ SALIDA: CONFIRMAR ============ -->
+  <div class="oculto" id="vistaConfSalida">
+    <section class="bloque">
+      <img class="ficha-foto" id="csFoto" alt="Foto de la persona">
+      <div class="ficha-nombre" id="csNombre"></div>
+      <div class="ficha-doc" id="csDoc"></div>
+      <span class="permiso-badge" id="csPermiso"></span>
+      <div class="conf-salida-dato" id="csLotes"></div>
+      <div class="conf-salida-dato" id="csHora"></div>
+      <div class="conf-salida-dato" id="csPatente"></div>
+      <div class="mensaje" id="msgConfSalida"></div>
+
+      <button class="principal boton-salida" id="btnRegistrarSalida">Registrar salida</button>
+
+      <!-- de uso poco frecuente: chico y discreto -->
+      <button class="agregar-chico" id="btnMostrarAgregarLote">+ Agregar lote</button>
+      <div class="agregar-chico-panel oculto" id="panelAgregarLote">
+        <input id="csLoteNuevo" inputmode="numeric" autocomplete="off" placeholder="Número de lote">
+        <button class="secundario" id="btnCsAgregarLote">Agregar</button>
+      </div>
+    </section>
+  </div>
+
+  <!-- ============ ALTA DE PERSONA ============ -->
+  <div class="oculto" id="vistaAlta">
+    <button class="volver" data-inicio>← Inicio</button>
+    <section class="bloque">
+      <h2>Nueva persona</h2>
+      <div class="mensaje" id="msgAltaInicio"></div>
+
+      <button class="principal escanear" id="btnEscanear">Escanear DNI</button>
+      <!-- usado por "Usar una foto" dentro del escáner -->
+      <input type="file" id="inCodigo" accept="image/*" capture="environment" hidden>
+
+      <div class="fila">
+        <div>
+          <label for="tipoDoc">Documento</label>
+          <select id="tipoDoc">
+            <option value="DNI">DNI</option>
+            <option value="PASAPORTE">Pasaporte</option>
+            <option value="OTRO">Otro</option>
+          </select>
+        </div>
+        <div>
+          <label for="numDoc">Número</label>
+          <input id="numDoc" inputmode="numeric" autocomplete="off">
+        </div>
+      </div>
+
+      <label for="apellido">Apellido</label>
+      <input id="apellido" autocomplete="off">
+
+      <label for="nombre">Nombre</label>
+      <input id="nombre" autocomplete="off">
+
+      <div class="fila">
+        <div>
+          <label for="sexo">Sexo</label>
+          <select id="sexo">
+            <option value=""></option>
+            <option value="M">M</option>
+            <option value="F">F</option>
+            <option value="X">X</option>
+          </select>
+        </div>
+        <div>
+          <label for="nacimiento">Nacimiento</label>
+          <input id="nacimiento" type="date">
+        </div>
+      </div>
+
+      <label for="permiso">Permiso</label>
+      <select id="permiso">
+        <option value="">Elegir…</option>
+        <option>VISITA</option>
+        <option>VISITA AUTORIZADA</option>
+        <option>TRABAJO</option>
+        <option>TRABAJO AUTORIZADO</option>
+        <option>REMIS</option>
+        <option>DELIVERY</option>
+        <option>OTRO</option>
+      </select>
+
+      <label for="observaciones" id="lblObservaciones">Observaciones</label>
+      <input id="observaciones" autocomplete="off">
+
+      <!-- Seguro: aparece para trabajadores, deliverys, remises y otros -->
+      <div id="bloqueSeguro" class="oculto">
+        <h3>Seguro</h3>
+        <label for="seguroDesc">Aseguradora (opcional)</label>
+        <input id="seguroDesc" autocomplete="off" placeholder="Ej.: La Caja, Sancor">
+        <label for="seguroVence">Vence</label>
+        <input id="seguroVence" type="date">
+        <button class="secundario" id="btnSeguro">Foto Certificado</button>
+        <input type="file" id="inSeguro" accept="image/*" capture="environment" hidden>
+        <div class="foto-previa" id="seguroPrevia">
+          <img id="seguroImg" alt="Certificado de seguro">
+          <small id="seguroPeso"></small>
+        </div>
+      </div>
+
+      <button class="secundario" id="btnFoto">Foto Persona</button>
+      <input type="file" id="inFoto" accept="image/*" capture="environment" hidden>
+      <div class="foto-previa" id="fotoPrevia">
+        <img id="fotoImg" alt="Foto de la persona">
+        <small id="fotoPeso"></small>
+      </div>
+
+      <button class="principal" id="btnGuardar">Guardar persona</button>
+      <div class="mensaje" id="msgAlta"></div>
+    </section>
+
+    <section class="bloque">
+      <h2>Últimas personas cargadas</h2>
+      <ul class="recientes" id="listaRecientes"></ul>
+    </section>
+  </div>
+
+</main>
+
+<!-- ============ SALIDA ESCONDIDA ============ -->
+<div id="modalSalir">
+  <section class="bloque">
+    <h2>Cerrar la sesión de este dispositivo</h2>
+    <label for="claveSalida">Contraseña de la cuenta</label>
+    <input id="claveSalida" type="password" autocomplete="off">
+    <button class="principal" id="btnConfirmarSalida">Cerrar sesión</button>
+    <button class="secundario" id="btnCancelarSalida">Cancelar</button>
+    <div class="mensaje" id="msgSalida"></div>
+  </section>
+</div>
+
+<!-- ============ CONFIRMACIÓN ============ -->
+<div id="confirmacion">✓ Entrada registrada</div>
+
+<!-- ============ ESCÁNER ============ -->
+<div id="escaner">
+  <video id="video" playsinline muted></video>
+  <div class="guia"></div>
+  <div class="pie">
+    <p>Poné el código del frente del DNI dentro del recuadro</p>
+    <p class="camara-info" id="camaraInfo"></p>
+    <div class="botones-pie">
+      <button class="secundario" id="btnCambiarCamara">Cambiar cámara</button>
+      <button class="secundario" id="btnDesdeFoto">Usar una foto</button>
+    </div>
+    <button class="secundario" id="btnCancelarEscaneo">Cancelar</button>
+  </div>
+</div>
+
+<script>
+// =====================================================================
+// CONFIGURACIÓN: pegar acá los datos de tu proyecto de Supabase
+// (Project Settings > API)
+// =====================================================================
+const SUPABASE_URL = 'https://yzxqukgseqefuyooigdc.supabase.co';
+const SUPABASE_KEY = 'sb_publishable_O3JEWK6LWRx9iiO5DBEmNQ_svGxOwO2';
+
+const PESO_MAXIMO = 200 * 1024;   // 200 KB por foto
+
+const sb = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+const $ = (id) => document.getElementById(id);
+
+let yo = null;            // datos de la cuenta conectada
+let fotoBlob = null;      // foto ya achicada
+let seguroBlob = null;    // foto del certificado de seguro ya achicada
+let escaneoCrudo = null;  // texto completo leído del DNI
+
+// ---------------------------------------------------------------------
+// Utilidades de pantalla
+// ---------------------------------------------------------------------
+function mensaje(id, texto, tipo) {
+  const el = $(id);
+  el.textContent = texto || '';
+  el.className = 'mensaje' + (texto ? ' ' + tipo : '');
+}
+// ---------------------------------------------------------------------
+// Navegación entre pantallas (el botón "atrás" del celular vuelve a la anterior)
+// ---------------------------------------------------------------------
+const VISTAS = { login: 'vistaLogin', inicio: 'vistaInicio', ingreso: 'vistaIngreso', ficha: 'vistaFicha', alta: 'vistaAlta',
+                 salida: 'vistaSalida', confSalida: 'vistaConfSalida' };
+let vistaActual = 'login';
+
+function mostrar(vista) {
+  vistaActual = vista;
+  Object.entries(VISTAS).forEach(([nombre, id]) => $(id).classList.toggle('oculto', nombre !== vista));
+  window.scrollTo(0, 0);
+  if (vista === 'salida') cargarAdentro();   // la lista siempre al día al volver
+}
+
+function irA(vista, reemplazar = false) {
+  const prof = (history.state && history.state.prof) || 0;
+  if (reemplazar) history.replaceState({ vista, prof }, '');
+  else history.pushState({ vista, prof: prof + 1 }, '');
+  mostrar(vista);
+}
+
+function volverAlInicio() {
+  const prof = (history.state && history.state.prof) || 0;
+  if (prof > 0) history.go(-prof);   // el "popstate" muestra el inicio
+  else mostrar('inicio');
+}
+
+document.querySelectorAll('[data-inicio]').forEach(b => b.onclick = volverAlInicio);
+function uuid() {
+  if (crypto.randomUUID) return crypto.randomUUID();
+  return ([1e7]+-1e3+-4e3+-8e3+-1e11).replace(/[018]/g, c =>
+    (c ^ crypto.getRandomValues(new Uint8Array(1))[0] & 15 >> c / 4).toString(16));
+}
+
+// ---------------------------------------------------------------------
+// Sesión
+// ---------------------------------------------------------------------
+async function iniciar() {
+  const { data: { session } } = await sb.auth.getSession();
+  if (session) await cargarUsuario();
+  else mostrar('login');
+}
+
+async function cargarUsuario() {
+  const { data: { user } } = await sb.auth.getUser();
+  if (!user) { mostrar('login'); return; }
+
+  const { data, error } = await sb
+    .from('usuarios')
+    .select('id, nombre, rol, barrio_id, activo, barrios(nombre)')
+    .eq('id', user.id)
+    .maybeSingle();
+
+  if (error || !data || !data.activo) {
+    await sb.auth.signOut();
+    mostrar('login');
+    mensaje('msgLogin', 'Esta cuenta no está habilitada. Consultá con el administrador del sistema.', 'error');
+    return;
+  }
+  if (!['guardia', 'admin_barrio'].includes(data.rol)) {
+    await sb.auth.signOut();
+    mostrar('login');
+    mensaje('msgLogin', 'Esta pantalla es para cuentas de cabina o de administración de un barrio.', 'error');
+    return;
+  }
+
+  yo = data;
+  $('quien').textContent = `${data.nombre}, ${data.barrios ? data.barrios.nombre : ''}`;
+  await cargarLotes();
+  history.replaceState({ vista: 'inicio', prof: 0 }, '');
+  mostrar('inicio');
+}
+
+// Lotes del barrio (para validar lo que tipea el guardia)
+let lotesPorNumero = {};
+async function cargarLotes() {
+  const { data } = await sb.from('lotes').select('id, numero, observaciones').eq('activo', true);
+  lotesPorNumero = {};
+  (data || []).forEach(l => { lotesPorNumero[l.numero] = l; });
+}
+
+$('btnEntrar').onclick = async () => {
+  mensaje('msgLogin', '');
+  $('btnEntrar').disabled = true;
+  const { error } = await sb.auth.signInWithPassword({
+    email: $('email').value.trim(),
+    password: $('clave').value
+  });
+  $('btnEntrar').disabled = false;
+  if (error) {
+    mensaje('msgLogin', 'No se pudo entrar: ' + error.message, 'error');
+    return;
+  }
+  $('clave').value = '';
+  cargarUsuario();
+};
+
+// ---------------------------------------------------------------------
+// Salida escondida: mantener apretado el título 10 segundos.
+// Pide la contraseña de la cuenta: sin ella, nadie puede cerrar la sesión.
+// ---------------------------------------------------------------------
+let temporizadorSalida = null;
+const titulo = document.querySelector('header h1');
+titulo.addEventListener('contextmenu', e => e.preventDefault());
+titulo.addEventListener('pointerdown', () => {
+  if (!yo) return;
+  clearTimeout(temporizadorSalida);
+  temporizadorSalida = setTimeout(abrirModalSalida, 10000);
+});
+['pointerup', 'pointerleave', 'pointercancel'].forEach(ev =>
+  titulo.addEventListener(ev, () => clearTimeout(temporizadorSalida)));
+
+function abrirModalSalida() {
+  $('claveSalida').value = '';
+  mensaje('msgSalida', '');
+  $('modalSalir').style.display = 'flex';
+  setTimeout(() => $('claveSalida').focus(), 50);
+}
+$('btnCancelarSalida').onclick = () => { $('modalSalir').style.display = 'none'; };
+
+$('btnConfirmarSalida').onclick = async () => {
+  const { data: { user } } = await sb.auth.getUser();
+  if (!user) return;
+  $('btnConfirmarSalida').disabled = true;
+  // se comprueba la contraseña volviendo a iniciar sesión con la misma cuenta
+  const { error } = await sb.auth.signInWithPassword({ email: user.email, password: $('claveSalida').value });
+  $('btnConfirmarSalida').disabled = false;
+  if (error) { mensaje('msgSalida', 'Contraseña incorrecta.', 'error'); return; }
+  await sb.auth.signOut();
+  $('modalSalir').style.display = 'none';
+  yo = null;
+  $('quien').textContent = '';
+  history.replaceState({ vista: 'login', prof: 0 }, '');
+  mostrar('login');
+};
+
+// ---------------------------------------------------------------------
+// Lectura del código del DNI (formato nuevo y formato viejo)
+// ---------------------------------------------------------------------
+function fechaISO(ddmmaaaa) {
+  const m = /^(\d{2})\/(\d{2})\/(\d{4})$/.exec((ddmmaaaa || '').trim());
+  return m ? `${m[3]}-${m[2]}-${m[1]}` : '';
+}
+
+function parsearDNI(texto) {
+  const t = (texto || '').replace(/[\r\n]/g, '').trim();
+  const p = t.split('@').map(s => s.trim());
+
+  // Nuevo: tramite@APELLIDO@NOMBRE@SEXO@DNI@EJEMPLAR@NACIMIENTO@EMISION@...
+  if (p.length > 7 && /^\d{8,12}$/.test(p[0])) {
+    return {
+      numero: p[4].replace(/\D/g, ''),
+      apellido: p[1], nombre: p[2], sexo: p[3],
+      nacimiento: fechaISO(p[6])
+    };
+  }
+  // Viejo: @DNI    @A@1@APELLIDO@NOMBRE@NACIONALIDAD@NACIMIENTO@SEXO@EMISION@...
+  if (t.startsWith('@') && p.length > 8) {
+    return {
+      numero: p[1].replace(/\D/g, ''),
+      apellido: p[4], nombre: p[5], sexo: p[8],
+      nacimiento: fechaISO(p[7])
+    };
+  }
+  return null;
+}
+
+async function procesarEscaneo(texto) {
+  const d = parsearDNI(texto);
+
+  // --- Escaneo desde la pantalla de Ingreso: buscar a la persona ---
+  if (vistaActual === 'ingreso') {
+    if (!d || !d.numero) {
+      mensaje('msgIngreso', 'Se leyó el código, pero no tiene el formato de un DNI. Tipeá el número.', 'aviso');
+      return;
+    }
+    $('numBuscar').value = d.numero;
+    const existente = await buscarExistente('DNI', d.numero);
+    if (existente) { abrirFicha(existente.id); return; }
+    // no está: alta con los datos ya escaneados
+    prepararAlta(d.numero);
+    irA('alta');
+    completarConEscaneo(texto, d);
+    return;
+  }
+
+  // --- Escaneo desde el alta ---
+  escaneoCrudo = texto;
+  if (!d || !d.numero) {
+    mensaje('msgAlta', 'Se leyó el código, pero no tiene el formato de un DNI. Completá los datos a mano.', 'aviso');
+    return;
+  }
+
+  // ¿coincide con el número que se había tipeado al buscar?
+  if (numeroTipeado && numeroTipeado !== d.numero) {
+    const existente = await buscarExistente('DNI', d.numero);
+    if (existente) {
+      abrirFicha(existente.id, true,
+        `El número escaneado es ${conPuntos(d.numero)}, no ${conPuntos(numeroTipeado)} como se había tipeado. Esta persona ya estaba registrada.`);
+      return;
+    }
+    mensaje('msgAltaInicio',
+      `Atención: el número escaneado es ${conPuntos(d.numero)}, no ${conPuntos(numeroTipeado)} como se había tipeado. Se usa el escaneado.`,
+      'aviso');
+  }
+  completarConEscaneo(texto, d);
+}
+
+function completarConEscaneo(texto, d) {
+  escaneoCrudo = texto;
+  $('tipoDoc').value = 'DNI';
+  $('numDoc').value = d.numero;
+  $('apellido').value = d.apellido || '';
+  $('nombre').value = d.nombre || '';
+  $('sexo').value = ['M', 'F', 'X'].includes(d.sexo) ? d.sexo : '';
+  $('nacimiento').value = d.nacimiento || '';
+  mensaje('msgAlta', 'Datos del DNI cargados. Revisalos, elegí el permiso y sacá la foto.', 'ok');
+}
+
+function conPuntos(n) {
+  return /^\d+$/.test(n || '') ? n.replace(/\B(?=(\d{3})+(?!\d))/g, '.') : (n || '');
+}
+
+
+// ---------------------------------------------------------------------
+// Escáner con la cámara
+//  - Si el celular tiene varias cámaras traseras, "Cambiar cámara" pasa
+//    a la siguiente y el celular recuerda la elegida para la próxima vez.
+//  - "Leer DNI desde una foto" usa la cámara normal del celular (con su
+//    enfoque automático) y busca el código en la foto tomada.
+// ---------------------------------------------------------------------
+const CLAVE_CAMARA = 'camaraEscanerDNI';
+let streamActual = null, escaneando = false, detector = null, lectorZXing = null;
+let camarasTraseras = [], camaraActual = null, sesionEscaner = 0;
+let nativoDisponible = null;
+
+function leerCamaraGuardada() { try { return localStorage.getItem(CLAVE_CAMARA); } catch (e) { return null; } }
+function guardarCamara(id)   { try { localStorage.setItem(CLAVE_CAMARA, id); } catch (e) { } }
+
+async function lectorNativoDisponible() {
+  if (nativoDisponible === null) {
+    nativoDisponible = false;
+    if ('BarcodeDetector' in window) {
+      try { nativoDisponible = (await BarcodeDetector.getSupportedFormats()).includes('pdf417'); }
+      catch (e) { nativoDisponible = false; }
+    }
+  }
+  return nativoDisponible;
+}
+
+function pistasZXing() {
+  const pistas = new Map();
+  pistas.set(ZXing.DecodeHintType.POSSIBLE_FORMATS, [ZXing.BarcodeFormat.PDF_417]);
+  pistas.set(ZXing.DecodeHintType.TRY_HARDER, true);
+  return pistas;
+}
+
+function restriccionesPara(deviceId) {
+  const v = { width: { ideal: 1920 }, height: { ideal: 1080 }, advanced: [{ focusMode: 'continuous' }] };
+  if (deviceId) v.deviceId = { exact: deviceId };
+  else v.facingMode = { ideal: 'environment' };
+  return { video: v, audio: false };
+}
+
+async function listarCamarasTraseras() {
+  const todas = (await navigator.mediaDevices.enumerateDevices()).filter(d => d.kind === 'videoinput');
+  const traseras = todas.filter(d => /back|rear|trasera|environment/i.test(d.label));
+  if (traseras.length) return traseras;
+  const noFrontales = todas.filter(d => !/front|frontal|user/i.test(d.label));
+  return noFrontales.length ? noFrontales : todas;
+}
+
+async function registrarCamaraActual(stream) {
+  const pista = stream && stream.getVideoTracks()[0];
+  camaraActual = pista ? pista.getSettings().deviceId : null;
+  camarasTraseras = await listarCamarasTraseras();
+  const n = camarasTraseras.length;
+  const i = camarasTraseras.findIndex(c => c.deviceId === camaraActual);
+  $('camaraInfo').textContent = n > 1 ? `Cámara ${i >= 0 ? i + 1 : '?'} de ${n}` : '';
+  $('btnCambiarCamara').disabled = n < 2;
+}
+
+function detenerCamara() {
+  if (lectorZXing) { lectorZXing.reset(); lectorZXing = null; }
+  if (streamActual) { streamActual.getTracks().forEach(t => t.stop()); streamActual = null; }
+  $('video').srcObject = null;
+}
+
+async function codigoLeido(texto) {
+  await cerrarEscaner();      // esperar a que el navegador termine de volver atrás
+  procesarEscaneo(texto);
+}
+
+async function iniciarCamara(deviceId) {
+  detenerCamara();
+  const miSesion = ++sesionEscaner;
+  const video = $('video');
+  const restricciones = restriccionesPara(deviceId);
+
+  if (await lectorNativoDisponible()) {
+    detector = detector || new BarcodeDetector({ formats: ['pdf417'] });
+    streamActual = await navigator.mediaDevices.getUserMedia(restricciones);
+    video.srcObject = streamActual;
+    await video.play();
+    await registrarCamaraActual(streamActual);
+    buscarNativo(miSesion);
+  } else {
+    lectorZXing = new ZXing.BrowserMultiFormatReader(pistasZXing());
+    await lectorZXing.decodeFromConstraints(restricciones, video, (resultado) => {
+      if (resultado && escaneando && miSesion === sesionEscaner) codigoLeido(resultado.getText());
+    });
+    await registrarCamaraActual(video.srcObject);
+  }
+}
+
+async function buscarNativo(miSesion) {
+  if (!escaneando || miSesion !== sesionEscaner) return;
+  try {
+    const codigos = await detector.detect($('video'));
+    if (codigos.length && miSesion === sesionEscaner) { codigoLeido(codigos[0].rawValue); return; }
+  } catch (e) { /* cuadro no listo todavía */ }
+  setTimeout(() => buscarNativo(miSesion), 200);
+}
+
+async function abrirEscaner() {
+  // el botón "atrás" del celular va a cerrar el escáner en vez de salir de la página
+  history.pushState({ escaner: true }, '');
+  mensaje('msgAlta', '');
+  $('camaraInfo').textContent = '';
+  $('escaner').style.display = 'flex';
+  escaneando = true;
+  const guardada = leerCamaraGuardada();
+  try {
+    await iniciarCamara(guardada);
+  } catch (e) {
+    try {
+      // la cámara guardada ya no existe o falló: probar la trasera por defecto
+      if (guardada) { await iniciarCamara(null); return; }
+      throw e;
+    } catch (e2) {
+      cerrarEscaner();
+      mensaje('msgAlta', 'No se pudo abrir la cámara. Revisá que el navegador tenga permiso para usarla.', 'error');
+    }
+  }
+}
+
+async function cambiarCamara() {
+  if (camarasTraseras.length < 2) return;
+  const i = camarasTraseras.findIndex(c => c.deviceId === camaraActual);
+  const siguiente = camarasTraseras[(i + 1) % camarasTraseras.length];
+  $('btnCambiarCamara').disabled = true;
+  try {
+    await iniciarCamara(siguiente.deviceId);
+    guardarCamara(siguiente.deviceId);
+  } catch (e) {
+    $('camaraInfo').textContent = 'Esa cámara no se pudo abrir. Probá con la siguiente.';
+    camaraActual = siguiente.deviceId;
+    $('btnCambiarCamara').disabled = false;
+  }
+}
+
+function cerrarEscaner() {
+  const estabaAbierto = $('escaner').style.display === 'flex';
+  escaneando = false;
+  sesionEscaner++;
+  detenerCamara();
+  $('escaner').style.display = 'none';
+  // si se cerró con un botón, se descarta el paso de historial del escáner
+  if (estabaAbierto && history.state && history.state.escaner) {
+    return new Promise(listo => {
+      window.addEventListener('popstate', () => listo(), { once: true });
+      history.back();
+    });
+  }
+  return Promise.resolve();
+}
+
+// "atrás": si el escáner está abierto lo cierra; si no, vuelve a la pantalla anterior
+window.addEventListener('popstate', (ev) => {
+  if ($('escaner').style.display === 'flex') { cerrarEscaner(); return; }
+  if (!yo) return;
+  const vista = (ev.state && ev.state.vista) || 'inicio';
+  mostrar(vista === 'login' ? 'inicio' : vista);
+});
+
+$('btnEscanear').onclick = abrirEscaner;
+$('btnCancelarEscaneo').onclick = cerrarEscaner;
+$('btnCambiarCamara').onclick = cambiarCamara;
+
+// --- Leer el código desde una foto ---
+$('btnDesdeFoto').onclick = () => { cerrarEscaner(); $('inCodigo').click(); };
+
+$('inCodigo').onchange = async (ev) => {
+  const archivo = ev.target.files[0];
+  ev.target.value = '';
+  if (!archivo) return;
+  mensaje('msgAlta', 'Buscando el código en la foto…', 'aviso');
+  let texto = null;
+  try { texto = await leerCodigoDeFoto(archivo); } catch (e) { texto = null; }
+  if (texto) procesarEscaneo(texto);
+  else mensaje('msgAlta',
+    'No se encontró el código en la foto. Sacala de más cerca, con buena luz, y con el código entero y derecho.',
+    'error');
+};
+
+async function leerCodigoDeFoto(archivo) {
+  const imagen = await createImageBitmap(archivo);
+
+  // 1) Lector nativo del celular
+  if (await lectorNativoDisponible()) {
+    try {
+      const r = await new BarcodeDetector({ formats: ['pdf417'] }).detect(imagen);
+      if (r.length) return r[0].rawValue;
+    } catch (e) { /* sigue con el respaldo */ }
+  }
+
+  // 2) Respaldo ZXing, con la foto reducida a 2000 px para que sea ágil
+  const escala = Math.min(1, 2000 / Math.max(imagen.width, imagen.height));
+  const lienzo = document.createElement('canvas');
+  lienzo.width = Math.round(imagen.width * escala);
+  lienzo.height = Math.round(imagen.height * escala);
+  lienzo.getContext('2d').drawImage(imagen, 0, 0, lienzo.width, lienzo.height);
+  const img = new Image();
+  img.src = lienzo.toDataURL('image/jpeg', 0.92);
+  await img.decode();
+  try {
+    const res = await new ZXing.BrowserMultiFormatReader(pistasZXing()).decodeFromImageElement(img);
+    return res.getText();
+  } catch (e) {
+    return null;
+  }
+}
+
+// ---------------------------------------------------------------------
+// Foto: se achica en el celular hasta 200 KB antes de subir
+// ---------------------------------------------------------------------
+$('btnFoto').onclick = () => $('inFoto').click();
+
+$('inFoto').onchange = async (ev) => {
+  const archivo = ev.target.files[0];
+  ev.target.value = '';
+  if (!archivo) return;
+  try {
+    fotoBlob = await achicarFoto(archivo);
+    $('fotoImg').src = URL.createObjectURL(fotoBlob);
+    $('fotoPeso').textContent = `${Math.round(fotoBlob.size / 1024)} KB`;
+    $('fotoPrevia').style.display = 'block';
+  } catch (e) {
+    fotoBlob = null;
+    mensaje('msgAlta', 'No se pudo procesar la foto. Probá sacarla de nuevo.', 'error');
+  }
+};
+
+async function achicarFoto(archivo, ladoInicial = 900) {
+  const img = await createImageBitmap(archivo);
+  const lienzo = document.createElement('canvas');
+  const ctx = lienzo.getContext('2d');
+  let lado = ladoInicial, calidad = 0.82, blob = null;
+
+  for (let intento = 0; intento < 10; intento++) {
+    const escala = Math.min(1, lado / Math.max(img.width, img.height));
+    lienzo.width = Math.round(img.width * escala);
+    lienzo.height = Math.round(img.height * escala);
+    ctx.drawImage(img, 0, 0, lienzo.width, lienzo.height);
+    blob = await new Promise(r => lienzo.toBlob(r, 'image/jpeg', calidad));
+    if (blob.size <= PESO_MAXIMO) return blob;
+    if (calidad > 0.55) calidad -= 0.08;
+    else lado = Math.round(lado * 0.85);
+  }
+  return blob;
+}
+
+// ---------------------------------------------------------------------
+// Permiso: muestra el bloque de seguro y exige observación si es OTRO
+// ---------------------------------------------------------------------
+const PERMISOS_CON_SEGURO = ['TRABAJO', 'TRABAJO AUTORIZADO', 'DELIVERY', 'REMIS', 'OTRO'];
+
+$('permiso').onchange = () => {
+  const p = $('permiso').value;
+  $('bloqueSeguro').classList.toggle('oculto', !PERMISOS_CON_SEGURO.includes(p));
+  $('lblObservaciones').textContent = p === 'OTRO'
+    ? 'Observaciones (obligatorio: aclarar el motivo)'
+    : 'Observaciones';
+};
+
+$('btnSeguro').onclick = () => $('inSeguro').click();
+
+$('inSeguro').onchange = async (ev) => {
+  const archivo = ev.target.files[0];
+  ev.target.value = '';
+  if (!archivo) return;
+  try {
+    // más resolución que la foto de la persona, para que el texto se lea
+    seguroBlob = await achicarFoto(archivo, 1400);
+    $('seguroImg').src = URL.createObjectURL(seguroBlob);
+    $('seguroPeso').textContent = `${Math.round(seguroBlob.size / 1024)} KB`;
+    $('seguroPrevia').style.display = 'block';
+  } catch (e) {
+    seguroBlob = null;
+    mensaje('msgAlta', 'No se pudo procesar la foto del certificado. Probá de nuevo.', 'error');
+  }
+};
+
+// ---------------------------------------------------------------------
+// ¿La persona ya existe en este barrio?
+// ---------------------------------------------------------------------
+function normalizarNumero(tipo, numero) {
+  const n = (numero || '').trim();
+  return tipo === 'DNI' ? n.replace(/\D/g, '') : n.toUpperCase();
+}
+
+async function buscarExistente(tipo, numero) {
+  const n = normalizarNumero(tipo, numero);
+  if (!n) return null;
+  const { data } = await sb
+    .from('personas')
+    .select('id, apellido, nombre, permiso')
+    .eq('tipo_documento', tipo)
+    .eq('numero_documento', n)
+    .maybeSingle();
+  return data || null;
+}
+
+// Si en el alta cambian el número a mano y esa persona existe, se avisa
+$('numDoc').addEventListener('change', async () => {
+  const e = await buscarExistente($('tipoDoc').value, $('numDoc').value);
+  if (e) mensaje('msgAlta',
+    `Esta persona ya está registrada: ${e.apellido || ''} ${e.nombre || ''}. Tocá "Guardar persona" para ir a su ficha.`, 'aviso');
+});
+
+// ---------------------------------------------------------------------
+// Guardar
+// ---------------------------------------------------------------------
+$('btnGuardar').onclick = guardarPersona;
+
+async function guardarPersona() {
+  mensaje('msgAlta', '');
+  const tipo = $('tipoDoc').value;
+  const numero = normalizarNumero(tipo, $('numDoc').value);
+  const apellido = $('apellido').value.trim();
+  const nombre = $('nombre').value.trim();
+  const permiso = $('permiso').value;
+
+  // Controles antes de guardar
+  if (!apellido && !nombre)  return mensaje('msgAlta', 'Falta el apellido o el nombre.', 'error');
+  if (!permiso)              return mensaje('msgAlta', 'Elegí el permiso.', 'error');
+  if (!fotoBlob)             return mensaje('msgAlta', 'Falta la foto de la persona.', 'error');
+  if (permiso === 'OTRO' && !$('observaciones').value.trim())
+    return mensaje('msgAlta', 'Con permiso OTRO, aclará el motivo en observaciones.', 'error');
+
+  // Seguro: si se carga, van juntos la foto y la fecha de vencimiento
+  const conSeguro = PERMISOS_CON_SEGURO.includes(permiso) && (seguroBlob || $('seguroVence').value);
+  if (conSeguro && !seguroBlob)           return mensaje('msgAlta', 'Falta la foto del certificado de seguro.', 'error');
+  if (conSeguro && !$('seguroVence').value) return mensaje('msgAlta', 'Falta la fecha de vencimiento del seguro.', 'error');
+  // Ya existe: ir directo a su ficha
+  if (numero) {
+    const existente = await buscarExistente(tipo, numero);
+    if (existente) { abrirFicha(existente.id, true, 'Esta persona ya estaba registrada.'); return; }
+  }
+
+  // Sin escaneo: verificar el número a ojo contra el documento
+  if (tipo === 'DNI' && numero && !escaneoCrudo) {
+    if (!confirm(`Verificá con el documento en la mano:\n\n${conPuntos(numero)}\n\n¿El número es correcto?`)) return;
+  }
+
+  $('btnGuardar').disabled = true;
+  $('btnGuardar').textContent = 'Guardando…';
+
+  try {
+    const personaId = uuid();
+    const ruta = `${yo.barrio_id}/${personaId}/${Date.now()}.jpg`;
+
+    // 1) Subir la foto al espacio privado
+    const subida = await sb.storage.from('adjuntos')
+      .upload(ruta, fotoBlob, { contentType: 'image/jpeg' });
+    if (subida.error) throw new Error('foto: ' + subida.error.message);
+
+    // 2) Crear la persona
+    const alta = await sb.from('personas').insert({
+      id: personaId,
+      barrio_id: yo.barrio_id,
+      tipo_documento: tipo,
+      numero_documento: numero || null,
+      apellido: apellido || null,
+      nombre: nombre || null,
+      sexo: $('sexo').value || null,
+      fecha_nacimiento: $('nacimiento').value || null,
+      escaneo_dni: escaneoCrudo,
+      permiso,
+      observaciones: $('observaciones').value.trim() || null
+    });
+    if (alta.error) {
+      if (alta.error.code === '23505') throw new Error('Ya existe una persona con ese documento en el barrio.');
+      throw new Error('persona: ' + alta.error.message);
+    }
+
+    // 3) Certificado de seguro, si se cargó
+    const adjuntos = [{
+      barrio_id: yo.barrio_id,
+      persona_id: personaId,
+      tipo: 'foto_persona',
+      archivo: ruta
+    }];
+    if (conSeguro) {
+      const rutaSeguro = `${yo.barrio_id}/${personaId}/seguro_${Date.now()}.jpg`;
+      const subSeguro = await sb.storage.from('adjuntos')
+        .upload(rutaSeguro, seguroBlob, { contentType: 'image/jpeg' });
+      if (subSeguro.error) throw new Error('certificado: ' + subSeguro.error.message);
+      adjuntos.push({
+        barrio_id: yo.barrio_id,
+        persona_id: personaId,
+        tipo: 'seguro',
+        archivo: rutaSeguro,
+        vence: $('seguroVence').value,
+        descripcion: $('seguroDesc').value.trim() || null
+      });
+    }
+
+    // 4) Vincular las fotos a la persona
+    const adj = await sb.from('adjuntos').insert(adjuntos);
+    if (adj.error) throw new Error('vínculo de foto: ' + adj.error.message);
+
+    limpiarFormulario();
+    abrirFicha(personaId, true, `Persona guardada: ${apellido} ${nombre}. Ahora registrá la entrada.`, 'ok');
+  } catch (e) {
+    mensaje('msgAlta', 'No se pudo guardar. Detalle: ' + e.message, 'error');
+  } finally {
+    $('btnGuardar').disabled = false;
+    $('btnGuardar').textContent = 'Guardar persona';
+  }
+}
+
+function limpiarFormulario() {
+  ['numDoc', 'apellido', 'nombre', 'nacimiento', 'observaciones']
+    .forEach(id => $(id).value = '');
+  $('tipoDoc').value = 'DNI';
+  $('sexo').value = '';
+  $('permiso').value = '';
+  fotoBlob = null;
+  escaneoCrudo = null;
+  numeroTipeado = null;
+  mensaje('msgAltaInicio', '');
+  mensaje('msgAlta', '');
+  $('fotoPrevia').style.display = 'none';
+  seguroBlob = null;
+  $('seguroDesc').value = '';
+  $('seguroVence').value = '';
+  $('seguroPrevia').style.display = 'none';
+  $('bloqueSeguro').classList.add('oculto');
+  $('lblObservaciones').textContent = 'Observaciones';
+}
+
+// ---------------------------------------------------------------------
+// Últimas personas cargadas (sirve para comprobar que las fotos se ven)
+// ---------------------------------------------------------------------
+async function cargarRecientes() {
+  const lista = $('listaRecientes');
+  const { data: personas, error } = await sb
+    .from('personas')
+    .select('id, apellido, nombre, numero_documento, permiso')
+    .order('creado_en', { ascending: false })
+    .limit(4);
+
+  lista.innerHTML = '';
+  if (error) { lista.textContent = 'No se pudo cargar la lista.'; return; }
+  if (!personas.length) { lista.textContent = 'Todavía no hay personas cargadas.'; return; }
+
+  // Fotos: permisos temporales de 5 minutos
+  const ids = personas.map(p => p.id);
+  const { data: adjuntos } = await sb
+    .from('adjuntos')
+    .select('persona_id, tipo, archivo, vence, creado_en')
+    .in('persona_id', ids)
+    .order('creado_en', { ascending: false });
+
+  const rutaPorPersona = {};
+  const venceSeguro = {};
+  (adjuntos || []).forEach(a => {
+    if (a.tipo === 'foto_persona' && !rutaPorPersona[a.persona_id]) rutaPorPersona[a.persona_id] = a.archivo;
+    if (a.tipo === 'seguro' && a.vence && !venceSeguro[a.persona_id]) venceSeguro[a.persona_id] = a.vence;
+  });
+  const rutas = Object.values(rutaPorPersona);
+  const urlPorRuta = {};
+  if (rutas.length) {
+    const { data: firmadas } = await sb.storage.from('adjuntos').createSignedUrls(rutas, 300);
+    (firmadas || []).forEach(f => { if (f.signedUrl) urlPorRuta[f.path] = f.signedUrl; });
+  }
+
+  personas.forEach(p => {
+    const li = document.createElement('li');
+    const url = urlPorRuta[rutaPorPersona[p.id]];
+    const foto = document.createElement(url ? 'img' : 'div');
+    if (url) { foto.src = url; foto.alt = ''; } else { foto.className = 'sin-foto'; }
+
+    const texto = document.createElement('div');
+    const n = document.createElement('div');
+    n.className = 'nombre';
+    n.textContent = `${p.apellido || ''} ${p.nombre || ''}`.trim();
+    const d = document.createElement('div');
+    d.className = 'datos';
+    d.textContent = `${p.numero_documento || 'Sin documento'}, ${p.permiso}`;
+    texto.append(n, d);
+    if (venceSeguro[p.id]) {
+      const v = venceSeguro[p.id];
+      const s = document.createElement('div');
+      const vencido = v < new Date().toISOString().slice(0, 10);
+      s.className = 'datos' + (vencido ? ' vencido' : '');
+      s.textContent = `Seguro ${vencido ? 'vencido el' : 'vence el'} ${v.split('-').reverse().join('/')}`;
+      texto.append(s);
+    }
+
+    li.append(foto, texto);
+    lista.append(li);
+  });
+}
+
+// =====================================================================
+// INGRESO: buscar por número
+// =====================================================================
+let numeroTipeado = null;   // número tipeado en la búsqueda (para compararlo con el escaneo)
+let temporizadorBusqueda = null;
+
+$('btnIrIngreso').onclick = () => {
+  $('numBuscar').value = '';
+  $('listaResultados').innerHTML = '';
+  $('btnNoRegistrado').classList.add('oculto');
+  mensaje('msgIngreso', '');
+  irA('ingreso');
+  setTimeout(() => $('numBuscar').focus(), 50);
+};
+
+$('btnEscanearIngreso').onclick = abrirEscaner;
+
+$('numBuscar').addEventListener('input', () => {
+  const n = $('numBuscar').value.replace(/\D/g, '');
+  if ($('numBuscar').value !== n) $('numBuscar').value = n;
+  clearTimeout(temporizadorBusqueda);
+  $('btnNoRegistrado').classList.toggle('oculto', n.length < 6);
+  if (n.length < 4) { $('listaResultados').innerHTML = ''; return; }
+  temporizadorBusqueda = setTimeout(() => buscarPorNumero(n), 250);
+});
+
+async function buscarPorNumero(n) {
+  const { data, error } = await sb
+    .from('personas')
+    .select('id, apellido, nombre, numero_documento, permiso')
+    .like('numero_documento', n + '%')
+    .order('numero_documento')
+    .limit(6);
+  if ($('numBuscar').value !== n) return;   // el guardia siguió tipeando
+  const lista = $('listaResultados');
+  lista.innerHTML = '';
+  if (error) { mensaje('msgIngreso', 'No se pudo buscar: ' + error.message, 'error'); return; }
+  mensaje('msgIngreso', '');
+  if (!data.length) {
+    lista.innerHTML = '<li class="datos">No hay ninguna persona con ese número.</li>';
+    return;
+  }
+  const fotos = await fotosDePersonas(data.map(p => p.id));
+  data.forEach(p => {
+    const li = document.createElement('li');
+    const url = fotos[p.id];
+    const foto = document.createElement(url ? 'img' : 'div');
+    if (url) { foto.src = url; foto.alt = ''; } else { foto.className = 'sin-foto'; }
+    const texto = document.createElement('div');
+    const nom = document.createElement('div');
+    nom.className = 'nombre';
+    nom.textContent = `${p.apellido || ''} ${p.nombre || ''}`.trim();
+    const dat = document.createElement('div');
+    dat.className = 'datos';
+    dat.textContent = `${conPuntos(p.numero_documento)}, ${p.permiso}`;
+    texto.append(nom, dat);
+    li.append(foto, texto);
+    li.onclick = () => abrirFicha(p.id);
+    lista.append(li);
+  });
+}
+
+// Foto más reciente de cada persona, con permiso temporal de 5 minutos
+async function fotosDePersonas(ids) {
+  if (!ids.length) return {};
+  const { data: adj } = await sb
+    .from('adjuntos')
+    .select('persona_id, archivo, creado_en')
+    .in('persona_id', ids)
+    .eq('tipo', 'foto_persona')
+    .order('creado_en', { ascending: false });
+  const ruta = {};
+  (adj || []).forEach(a => { if (!ruta[a.persona_id]) ruta[a.persona_id] = a.archivo; });
+  const rutas = Object.values(ruta);
+  if (!rutas.length) return {};
+  const { data: firmadas } = await sb.storage.from('adjuntos').createSignedUrls(rutas, 300);
+  const urlPorRuta = {};
+  (firmadas || []).forEach(f => { if (f.signedUrl) urlPorRuta[f.path] = f.signedUrl; });
+  const res = {};
+  Object.entries(ruta).forEach(([id, r]) => { if (urlPorRuta[r]) res[id] = urlPorRuta[r]; });
+  return res;
+}
+
+// "No está registrado": alta con el número ya cargado
+$('btnNoRegistrado').onclick = () => {
+  prepararAlta($('numBuscar').value);
+  irA('alta');
+};
+
+function prepararAlta(numero) {
+  limpiarFormulario();
+  numeroTipeado = numero || null;
+  $('numDoc').value = numero || '';
+  mensaje('msgAltaInicio', 'Escaneá el DNI para completar los datos y verificar el número.', 'aviso');
+  cargarRecientes();
+}
+
+// =====================================================================
+// FICHA DE LA PERSONA Y REGISTRO DE ENTRADA
+// =====================================================================
+let fichaPersona = null;
+let lotesElegidos = [];      // números de lote
+let patenteElegida = '';
+let medioElegido = null;
+let acompanantes = 0;
+
+async function abrirFicha(personaId, reemplazar = false, aviso = '', tipoAviso = 'aviso') {
+  limpiarEntrada();
+  irA('ficha', reemplazar);
+  mensaje('msgFichaAviso', aviso, tipoAviso);
+  ['msgFichaSeguro', 'msgFichaAdentro'].forEach(id => mensaje(id, ''));
+  $('fichaNombre').textContent = 'Cargando…';
+  $('fichaDoc').textContent = '';
+  $('fichaPermiso').textContent = '';
+  $('fichaObs').textContent = '';
+  $('fichaFoto').removeAttribute('src');
+
+  const { data: p, error } = await sb
+    .from('personas')
+    .select('id, tipo_documento, numero_documento, apellido, nombre, permiso, observaciones')
+    .eq('id', personaId)
+    .maybeSingle();
+  if (error || !p) { $('fichaNombre').textContent = 'No se encontró la persona.'; return; }
+  fichaPersona = p;
+
+  $('fichaNombre').textContent = `${p.apellido || ''} ${p.nombre || ''}`.trim();
+  $('fichaDoc').textContent = `${p.tipo_documento} ${conPuntos(p.numero_documento) || 'sin número'}`;
+  $('fichaPermiso').textContent = p.permiso;
+  $('fichaPermiso').className = 'permiso-badge' + (p.permiso.includes('AUTORIZAD') ? ' autorizado' : '');
+  $('fichaObs').textContent = p.observaciones ? `Observaciones: ${p.observaciones}` : '';
+
+  // Foto
+  const fotos = await fotosDePersonas([p.id]);
+  if (fotos[p.id]) $('fichaFoto').src = fotos[p.id];
+
+  // Seguro: solo avisa, nunca bloquea
+  const llevaSeguro = PERMISOS_CON_SEGURO.includes(p.permiso);
+  $('btnActualizarSeguro').classList.toggle('oculto', !llevaSeguro);
+  if (llevaSeguro) await mostrarSeguro(p.id);
+
+  // Movimientos anteriores: ¿figura adentro? y patentes usadas
+  const { data: movs } = await sb
+    .from('movimientos')
+    .select('id, tipo, fecha_hora, patente')
+    .eq('persona_id', p.id)
+    .order('fecha_hora', { ascending: false })
+    .limit(20);
+  if (movs && movs.length && movs[0].tipo === 'entrada') {
+    const f = new Date(movs[0].fecha_hora);
+    mensaje('msgFichaAdentro',
+      `Figura adentro desde el ${f.toLocaleDateString('es-AR')} a las ${f.toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' })}. Puede que no se haya marcado la salida.`,
+      'aviso');
+  }
+  const patentes = [...new Set((movs || []).map(m => m.patente).filter(Boolean))].slice(0, 4);
+  dibujarPatentes(patentes);
+}
+
+// Muestra el ÚLTIMO seguro cargado (así una fecha mal cargada se corrige cargando otro)
+async function mostrarSeguro(personaId) {
+  const { data: seg } = await sb
+    .from('adjuntos')
+    .select('vence, descripcion, creado_en')
+    .eq('persona_id', personaId)
+    .eq('tipo', 'seguro')
+    .order('creado_en', { ascending: false })
+    .limit(1);
+  if (seg && seg.length && seg[0].vence) {
+    const v = seg[0].vence;
+    const fecha = v.split('-').reverse().join('/');
+    const aseg = seg[0].descripcion ? ` (${seg[0].descripcion})` : '';
+    if (v < hoyISO()) mensaje('msgFichaSeguro', `SEGURO VENCIDO el ${fecha}${aseg}`, 'error');
+    else mensaje('msgFichaSeguro', `Seguro vigente hasta el ${fecha}${aseg}`, 'ok');
+  } else {
+    mensaje('msgFichaSeguro', 'No tiene seguro cargado.', 'aviso');
+  }
+}
+
+// --- Actualizar seguro desde la ficha ---
+let fsBlob = null;
+
+function cerrarPanelSeguro() {
+  fsBlob = null;
+  $('fsDesc').value = '';
+  $('fsVence').value = '';
+  $('fsPrevia').style.display = 'none';
+  mensaje('msgFs', '');
+  $('panelSeguro').classList.add('oculto');
+  $('btnActualizarSeguro').classList.toggle('oculto',
+    !(fichaPersona && PERMISOS_CON_SEGURO.includes(fichaPersona.permiso)));
+}
+
+$('btnActualizarSeguro').onclick = () => {
+  $('panelSeguro').classList.remove('oculto');
+  $('btnActualizarSeguro').classList.add('oculto');
+};
+$('btnFsCancelar').onclick = cerrarPanelSeguro;
+$('btnFsFoto').onclick = () => $('inFsFoto').click();
+
+$('inFsFoto').onchange = async (ev) => {
+  const archivo = ev.target.files[0];
+  ev.target.value = '';
+  if (!archivo) return;
+  try {
+    fsBlob = await achicarFoto(archivo, 1400);
+    $('fsImg').src = URL.createObjectURL(fsBlob);
+    $('fsPeso').textContent = `${Math.round(fsBlob.size / 1024)} KB`;
+    $('fsPrevia').style.display = 'block';
+  } catch (e) {
+    fsBlob = null;
+    mensaje('msgFs', 'No se pudo procesar la foto del certificado. Probá de nuevo.', 'error');
+  }
+};
+
+$('btnFsGuardar').onclick = async () => {
+  if (!fichaPersona) return;
+  if (!fsBlob)                return mensaje('msgFs', 'Falta la foto del certificado.', 'error');
+  if (!$('fsVence').value)    return mensaje('msgFs', 'Falta la fecha de vencimiento.', 'error');
+
+  const boton = $('btnFsGuardar');
+  boton.disabled = true;
+  boton.textContent = 'Guardando…';
+  try {
+    const ruta = `${yo.barrio_id}/${fichaPersona.id}/seguro_${Date.now()}.jpg`;
+    const sub = await sb.storage.from('adjuntos').upload(ruta, fsBlob, { contentType: 'image/jpeg' });
+    if (sub.error) throw new Error('certificado: ' + sub.error.message);
+    const ins = await sb.from('adjuntos').insert({
+      barrio_id: yo.barrio_id,
+      persona_id: fichaPersona.id,
+      tipo: 'seguro',
+      archivo: ruta,
+      vence: $('fsVence').value,
+      descripcion: $('fsDesc').value.trim() || null
+    });
+    if (ins.error) throw new Error(ins.error.message);
+    cerrarPanelSeguro();
+    await mostrarSeguro(fichaPersona.id);
+  } catch (e) {
+    mensaje('msgFs', 'No se pudo guardar el seguro. Detalle: ' + e.message, 'error');
+  } finally {
+    boton.disabled = false;
+    boton.textContent = 'Guardar seguro';
+  }
+};
+
+function hoyISO() {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
+// --- Lotes ---
+function agregarLotesDesdeCampo() {
+  const numeros = $('loteNuevo').value.split(/[\s,;]+/).map(s => s.trim()).filter(Boolean);
+  const invalidos = [];
+  numeros.forEach(n => {
+    const limpio = String(parseInt(n, 10));
+    if (lotesPorNumero[limpio]) { if (!lotesElegidos.includes(limpio)) lotesElegidos.push(limpio); }
+    else invalidos.push(n);
+  });
+  $('loteNuevo').value = '';
+  dibujarLotes();
+  mensaje('msgEntrada', invalidos.length ? `No existe el lote ${invalidos.join(', ')} en este barrio.` : '', 'error');
+}
+$('btnAgregarLote').onclick = agregarLotesDesdeCampo;
+$('loteNuevo').addEventListener('keydown', (e) => { if (e.key === 'Enter') agregarLotesDesdeCampo(); });
+
+function dibujarLotes() {
+  const cont = $('chipsLotes');
+  cont.innerHTML = '';
+  lotesElegidos.forEach(n => {
+    const b = document.createElement('button');
+    b.className = 'chip activo';
+    const obs = lotesPorNumero[n] && lotesPorNumero[n].observaciones;
+    b.textContent = `Lote ${n}${obs ? ' – ' + obs : ''}  ✕`;
+    b.title = 'Quitar';
+    b.onclick = () => { lotesElegidos = lotesElegidos.filter(x => x !== n); dibujarLotes(); };
+    cont.append(b);
+  });
+}
+
+// --- Patentes ---
+function dibujarPatentes(patentes) {
+  const cont = $('chipsPatentes');
+  cont.innerHTML = '';
+  patentes.forEach(pt => {
+    const b = document.createElement('button');
+    b.className = 'chip' + (patenteElegida === pt ? ' activo' : '');
+    b.textContent = pt;
+    b.onclick = () => {
+      patenteElegida = patenteElegida === pt ? '' : pt;
+      $('patente').value = '';
+      dibujarPatentes(patentes);
+    };
+    cont.append(b);
+  });
+  cont.dataset.patentes = JSON.stringify(patentes);
+}
+$('patente').addEventListener('input', () => {
+  if ($('patente').value.trim() && patenteElegida) {
+    patenteElegida = '';
+    dibujarPatentes(JSON.parse($('chipsPatentes').dataset.patentes || '[]'));
+  }
+});
+
+// --- Cómo llegó ---
+document.querySelectorAll('#opcionesMedio .chip').forEach(b => {
+  b.onclick = () => {
+    medioElegido = medioElegido === b.dataset.medio ? null : b.dataset.medio;
+    document.querySelectorAll('#opcionesMedio .chip')
+      .forEach(x => x.classList.toggle('activo', x.dataset.medio === medioElegido));
+  };
+});
+
+// --- Acompañantes ---
+$('btnMenos').onclick = () => { acompanantes = Math.max(0, acompanantes - 1); $('numAcomp').textContent = acompanantes; };
+$('btnMas').onclick   = () => { acompanantes += 1; $('numAcomp').textContent = acompanantes; };
+
+function limpiarEntrada() {
+  fichaPersona = null;
+  cerrarPanelSeguro();
+  lotesElegidos = [];
+  patenteElegida = '';
+  medioElegido = null;
+  acompanantes = 0;
+  $('numAcomp').textContent = '0';
+  $('loteNuevo').value = '';
+  $('patente').value = '';
+  $('obsEntrada').value = '';
+  dibujarLotes();
+  dibujarPatentes([]);
+  document.querySelectorAll('#opcionesMedio .chip').forEach(x => x.classList.remove('activo'));
+  mensaje('msgEntrada', '');
+}
+
+// --- Registrar ---
+$('btnRegistrarEntrada').onclick = async () => {
+  if (!fichaPersona) return;
+  if ($('loteNuevo').value.trim()) agregarLotesDesdeCampo();   // si quedó un número tipeado sin agregar
+  if (!lotesElegidos.length) return mensaje('msgEntrada', 'Indicá al menos un lote.', 'error');
+
+  const boton = $('btnRegistrarEntrada');
+  boton.disabled = true;
+  boton.textContent = 'Registrando…';
+  try {
+    const movId = uuid();
+    const patente = $('patente').value.trim() || patenteElegida || null;
+    const mov = await sb.from('movimientos').insert({
+      id: movId,
+      barrio_id: yo.barrio_id,
+      persona_id: fichaPersona.id,
+      tipo: 'entrada',
+      patente,
+      medio: medioElegido,
+      acompanantes,
+      observaciones: $('obsEntrada').value.trim() || null
+    });
+    if (mov.error) throw new Error(mov.error.message);
+
+    const lotes = lotesElegidos.map(n => ({
+      barrio_id: yo.barrio_id,
+      movimiento_id: movId,
+      lote_id: lotesPorNumero[n].id
+    }));
+    const ml = await sb.from('movimiento_lotes').insert(lotes);
+    if (ml.error) throw new Error('lotes: ' + ml.error.message);
+
+    // Confirmación grande y vuelta al inicio
+    confirmacionGrande('✓ Entrada registrada', 'var(--ok)', () => {
+      limpiarEntrada();
+      volverAlInicio();
+    });
+  } catch (e) {
+    mensaje('msgEntrada', 'No se pudo registrar la entrada. Detalle: ' + e.message, 'error');
+  } finally {
+    boton.disabled = false;
+    boton.textContent = 'Registrar entrada';
+  }
+};
+
+// =====================================================================
+// SALIDA
+// =====================================================================
+function confirmacionGrande(texto, color, despues) {
+  const c = $('confirmacion');
+  c.textContent = texto;
+  c.style.background = color;
+  c.style.display = 'flex';
+  setTimeout(() => { c.style.display = 'none'; despues(); }, 1800);
+}
+
+let adentro = [];             // personas adentro (desde la vista personas_adentro)
+let fotosAdentro = {};
+let salidaActual = null;      // persona elegida para registrar la salida
+let refrescoSalida = null;
+
+$('btnIrSalida').onclick = () => {
+  $('buscarSalida').value = '';
+  $('panelNoFigura').classList.add('oculto');
+  $('btnNoFigura').classList.remove('oculto');
+  irA('salida');
+};
+
+// Con dos celulares en la cabina, la lista se actualiza sola cada 30 segundos
+setInterval(() => { if (vistaActual === 'salida') cargarAdentro(); }, 30000);
+
+async function cargarAdentro() {
+  const { data, error } = await sb
+    .from('personas_adentro')
+    .select('persona_id, apellido, nombre, numero_documento, permiso, entrada_id, hora_entrada, patente, lotes')
+    .order('hora_entrada', { ascending: false });
+  if (error) { mensaje('msgSalidaLista', 'No se pudo cargar la lista: ' + error.message, 'error'); return; }
+  mensaje('msgSalidaLista', '');
+  adentro = data || [];
+  $('cantAdentro').textContent = adentro.length === 1 ? '1 persona adentro' : `${adentro.length} personas adentro`;
+  fotosAdentro = await fotosDePersonas(adentro.map(a => a.persona_id));
+  dibujarAdentro();
+}
+
+function normal(t) { return (t || '').toUpperCase().replace(/[\s\-\.]/g, ''); }
+
+function dibujarAdentro() {
+  const filtro = normal($('buscarSalida').value);
+  const lista = $('listaAdentro');
+  lista.innerHTML = '';
+  const visibles = adentro.filter(a => !filtro
+    || normal(a.numero_documento).startsWith(filtro)
+    || normal(a.apellido).includes(filtro)
+    || normal(a.nombre).includes(filtro)
+    || normal(a.patente).includes(filtro));
+
+  if (!visibles.length) {
+    lista.innerHTML = filtro
+      ? '<li class="datos">Nadie adentro coincide con la búsqueda.</li>'
+      : '<li class="datos">No hay nadie adentro.</li>';
+    return;
+  }
+
+  visibles.forEach(a => {
+    const li = document.createElement('li');
+    li.className = 'item-salida';
+    const url = fotosAdentro[a.persona_id];
+    const foto = document.createElement(url ? 'img' : 'div');
+    if (url) { foto.src = url; foto.alt = ''; } else { foto.className = 'sin-foto'; }
+
+    const texto = document.createElement('div');
+    const n = document.createElement('div');
+    n.className = 'nombre';
+    n.textContent = `${a.apellido || ''} ${a.nombre || ''}`.trim();
+    const l = document.createElement('div');
+    l.className = 'lotes';
+    l.textContent = a.lotes ? `Lote ${a.lotes}` : 'Sin lote';
+    const d = document.createElement('div');
+    d.className = 'datos';
+    d.textContent = [a.permiso, a.patente, `entró ${horaCorta(a.hora_entrada)}`].filter(Boolean).join(' · ');
+    texto.append(n, l, d);
+
+    li.append(foto, texto);
+    li.onclick = () => abrirConfSalida(a, url);
+    lista.append(li);
+  });
+}
+
+$('buscarSalida').addEventListener('input', dibujarAdentro);
+
+function horaCorta(iso) {
+  const f = new Date(iso);
+  const hoy = new Date();
+  const hora = f.toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' });
+  return f.toDateString() === hoy.toDateString() ? `hoy ${hora}` : `${f.toLocaleDateString('es-AR')} ${hora}`;
+}
+
+// --- Confirmar la salida ---
+function abrirConfSalida(a, fotoUrl) {
+  salidaActual = a;
+  irA('confSalida');
+  mensaje('msgConfSalida', '');
+  $('panelAgregarLote').classList.add('oculto');
+  $('csLoteNuevo').value = '';
+
+  if (fotoUrl) $('csFoto').src = fotoUrl; else $('csFoto').removeAttribute('src');
+  $('csNombre').textContent = `${a.apellido || ''} ${a.nombre || ''}`.trim();
+  $('csDoc').textContent = `DNI ${conPuntos(a.numero_documento) || 'sin número'}`;
+  $('csPermiso').textContent = a.permiso;
+  $('csPermiso').className = 'permiso-badge' + (a.permiso && a.permiso.includes('AUTORIZAD') ? ' autorizado' : '');
+
+  if (a.entrada_id) {
+    $('csLotes').textContent = a.lotes ? `Lote ${a.lotes}` : 'Sin lote';
+    $('csHora').textContent = `Entró ${horaCorta(a.hora_entrada)}`;
+    $('csPatente').textContent = a.patente ? `Patente ${a.patente}` : '';
+    $('btnMostrarAgregarLote').classList.remove('oculto');
+  } else {
+    $('csLotes').textContent = '';
+    $('csHora').textContent = '';
+    $('csPatente').textContent = '';
+    mensaje('msgConfSalida', 'No figura una entrada registrada. La salida se guarda igual.', 'aviso');
+    $('btnMostrarAgregarLote').classList.add('oculto');
+  }
+}
+
+$('btnRegistrarSalida').onclick = async () => {
+  if (!salidaActual) return;
+  const boton = $('btnRegistrarSalida');
+  boton.disabled = true;
+  boton.textContent = 'Registrando…';
+  try {
+    // ¿otro celular ya marcó esta salida?
+    if (salidaActual.entrada_id) {
+      const { data: ult } = await sb
+        .from('movimientos')
+        .select('id')
+        .eq('persona_id', salidaActual.persona_id)
+        .order('fecha_hora', { ascending: false })
+        .limit(1);
+      if (!ult || !ult.length || ult[0].id !== salidaActual.entrada_id) {
+        mensaje('msgConfSalida', 'Esta salida ya se registró desde otro dispositivo.', 'aviso');
+        return;
+      }
+    }
+    const ins = await sb.from('movimientos').insert({
+      id: uuid(),
+      barrio_id: yo.barrio_id,
+      persona_id: salidaActual.persona_id,
+      tipo: 'salida',
+      entrada_id: salidaActual.entrada_id || null
+    });
+    if (ins.error) throw new Error(ins.error.message);
+
+    // Confirmación y vuelta a la lista, lista para la próxima salida
+    confirmacionGrande('✓ Salida registrada', 'var(--garita)', () => {
+      salidaActual = null;
+      $('buscarSalida').value = '';
+      history.back();          // vuelve a la lista (y se actualiza sola)
+    });
+  } catch (e) {
+    mensaje('msgConfSalida', 'No se pudo registrar la salida. Detalle: ' + e.message, 'error');
+  } finally {
+    boton.disabled = false;
+    boton.textContent = 'Registrar salida';
+  }
+};
+
+// --- Agregar un lote a quien ya está adentro (uso poco frecuente) ---
+$('btnMostrarAgregarLote').onclick = () => {
+  $('panelAgregarLote').classList.remove('oculto');
+  $('btnMostrarAgregarLote').classList.add('oculto');
+  $('csLoteNuevo').focus();
+};
+
+$('btnCsAgregarLote').onclick = async () => {
+  if (!salidaActual || !salidaActual.entrada_id) return;
+  const num = String(parseInt($('csLoteNuevo').value, 10));
+  const lote = lotesPorNumero[num];
+  if (!lote) { mensaje('msgConfSalida', `No existe el lote ${$('csLoteNuevo').value} en este barrio.`, 'error'); return; }
+
+  const ins = await sb.from('movimiento_lotes').insert({
+    barrio_id: yo.barrio_id,
+    movimiento_id: salidaActual.entrada_id,
+    lote_id: lote.id
+  });
+  if (ins.error) {
+    const yaEstaba = ins.error.code === '23505';
+    mensaje('msgConfSalida', yaEstaba ? `El lote ${num} ya estaba en esta entrada.` : 'No se pudo agregar el lote: ' + ins.error.message,
+            yaEstaba ? 'aviso' : 'error');
+    return;
+  }
+  const lotes = (salidaActual.lotes ? salidaActual.lotes.split(', ') : []).concat(num)
+    .sort((x, y) => Number(x) - Number(y));
+  salidaActual.lotes = lotes.join(', ');
+  $('csLotes').textContent = `Lote ${salidaActual.lotes}`;
+  $('csLoteNuevo').value = '';
+  $('panelAgregarLote').classList.add('oculto');
+  $('btnMostrarAgregarLote').classList.remove('oculto');
+  mensaje('msgConfSalida', `Lote ${num} agregado.`, 'ok');
+};
+
+// --- No figura adentro: buscar por DNI y registrar la salida igual ---
+let tempNoFigura = null;
+$('btnNoFigura').onclick = () => {
+  $('panelNoFigura').classList.remove('oculto');
+  $('btnNoFigura').classList.add('oculto');
+  $('dniNoFigura').value = '';
+  $('listaNoFigura').innerHTML = '';
+  $('dniNoFigura').focus();
+};
+
+$('dniNoFigura').addEventListener('input', () => {
+  const n = $('dniNoFigura').value.replace(/\D/g, '');
+  $('dniNoFigura').value = n;
+  clearTimeout(tempNoFigura);
+  if (n.length < 4) { $('listaNoFigura').innerHTML = ''; return; }
+  tempNoFigura = setTimeout(async () => {
+    const { data } = await sb
+      .from('personas')
+      .select('id, apellido, nombre, numero_documento, permiso')
+      .like('numero_documento', n + '%')
+      .order('numero_documento')
+      .limit(6);
+    if ($('dniNoFigura').value !== n) return;
+    const lista = $('listaNoFigura');
+    lista.innerHTML = '';
+    if (!data || !data.length) { lista.innerHTML = '<li class="datos">No hay ninguna persona con ese número.</li>'; return; }
+    const fotos = await fotosDePersonas(data.map(p => p.id));
+    data.forEach(p => {
+      const li = document.createElement('li');
+      const url = fotos[p.id];
+      const foto = document.createElement(url ? 'img' : 'div');
+      if (url) { foto.src = url; foto.alt = ''; } else { foto.className = 'sin-foto'; }
+      const texto = document.createElement('div');
+      const nom = document.createElement('div');
+      nom.className = 'nombre';
+      nom.textContent = `${p.apellido || ''} ${p.nombre || ''}`.trim();
+      const dat = document.createElement('div');
+      dat.className = 'datos';
+      dat.textContent = `${conPuntos(p.numero_documento)}, ${p.permiso}`;
+      texto.append(nom, dat);
+      li.append(foto, texto);
+      li.onclick = () => abrirConfSalida({
+        persona_id: p.id, apellido: p.apellido, nombre: p.nombre,
+        numero_documento: p.numero_documento, permiso: p.permiso, entrada_id: null
+      }, url);
+      lista.append(li);
+    });
+  }, 250);
+});
+
+iniciar();
+</script>
+</body>
+</html>
